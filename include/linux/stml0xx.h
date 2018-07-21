@@ -29,6 +29,10 @@
 #include <linux/switch.h>
 #include <linux/wakelock.h>
 
+#ifdef CONFIG_MMI_HALL_NOTIFICATIONS
+#include <linux/mmi_hall_notifier.h>
+#endif
+
 /* Log macros */
 #define ENABLE_VERBOSE_LOGGING 0
 
@@ -163,10 +167,7 @@ enum sh_spi_msg {
 
 #define STOWED                          0x6D
 
-#define ALGO_CFG_MODALITY               0x6E
-#define ALGO_CFG_ORIENTATION            0x6F
-#define ALGO_CFG_STOWED                 0x70
-#define ALGO_CFG_ACCUM_MVMT             0x71
+#define ALS_UPDATE_RATE                 0x6F
 
 #define ALGO_REQ_MODALITY               0x72
 #define ALGO_REQ_ORIENTATION            0x73
@@ -237,6 +238,7 @@ enum sh_spi_msg {
 #define WAKE_IRQ_IDX_MODALITY_ACCUM        50
 #define WAKE_IRQ_IDX_MODALITY_ACCUM_MVMT   52
 #define WAKE_IRQ_IDX_LOG_MSG               56
+#define WAKE_IRQ_IDX_STOWED_ALS		(WAKE_IRQ_IDX_LOG_MSG + LOG_MSG_SIZE)
 
 /* stml0xx_readbuff offsets. */
 #define IRQ_WAKE_LO  0
@@ -411,6 +413,9 @@ struct stml0xx_data {
 
 	bool is_suspended;
 	bool pending_wake_work;
+#ifdef CONFIG_MMI_HALL_NOTIFICATIONS
+	struct mmi_hall_data *hall_data;
+#endif
 };
 
 #ifndef ts_to_ns
@@ -535,6 +540,7 @@ extern unsigned short stml0xx_g_acc2_delay;
 extern unsigned short stml0xx_g_mag_delay;
 extern unsigned short stml0xx_g_gyro_delay;
 extern unsigned short stml0xx_g_baro_delay;
+extern unsigned short stml0xx_g_als_delay;
 extern unsigned long stml0xx_g_nonwake_sensor_state;
 extern unsigned short stml0xx_g_algo_state;
 extern unsigned char stml0xx_g_motion_dur;

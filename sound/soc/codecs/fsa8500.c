@@ -58,6 +58,7 @@
 
 #define	SND_JACK_BTN_SHIFT	20
 #define	FSA8500_LINT_DEBOUNCE	200
+#define	FSA8500_DETECT_DEBOUNCE	2000
 
 static struct snd_soc_jack hs_jack;
 static struct snd_soc_jack button_jack;
@@ -77,10 +78,12 @@ struct fsa8500_data {
 	int amp_state;
 	int mic_state;
 	int alwayson_micb;
-	int button_detect_state;
+	u32 detect_time_ms;
 	struct mutex lock;
 	struct wake_lock wake_lock;
 	struct delayed_work work_det;
+	struct delayed_work work_restore;
+	struct delayed_work work_disconnect;
 	struct workqueue_struct *wq;
 };
 
@@ -482,6 +485,7 @@ static int fsa8500_report_hs(struct fsa8500_data *fsa8500)
 
 	/* 3 or 4 pole HS */
 	if (fsa8500->irq_status[0] & 0x7) {
+		cancel_delayed_work_sync(&fsa8500->work_disconnect);
 		fsa8500->inserted = 1;
 		fsa8500->hs_acc_type = fsa8500_get_hs_acc_type(fsa8500);
 		pr_debug("%s:report HS insert,type %d\n", __func__,
@@ -489,21 +493,16 @@ static int fsa8500_report_hs(struct fsa8500_data *fsa8500)
 		snd_soc_jack_report_no_dapm(fsa8500->hs_jack,
 					fsa8500->hs_acc_type,
 					fsa8500->hs_jack->jack->type);
+		fsa8500->detect_time_ms = ktime_to_ms(ktime_get());
 	}
 
 	/* Disconnect or UART */
 	if ((fsa8500->irq_status[0] & 0x18) && fsa8500->inserted) {
-		pr_debug("%s:report HS removal,type %d\n", __func__,
+		pr_debug("%s:Got HS removal,type %d\n", __func__,
 					fsa8500->hs_acc_type);
-		snd_soc_jack_report_no_dapm(fsa8500->hs_jack, 0,
-					fsa8500->hs_jack->jack->type);
-		if (fsa8500->button_pressed) {
-			pr_debug("%s:report button release\n", __func__);
-			snd_soc_jack_report_no_dapm(fsa8500->button_jack,
-				0, fsa8500->button_jack->jack->type);
-		fsa8500->button_pressed = 0;
-		}
-		fsa8500->inserted = 0;
+		/* Schedule Disconnect report */
+		queue_delayed_work(fsa8500->wq, &fsa8500->work_disconnect,
+					msecs_to_jiffies(1000));
 	}
 
 	/* UART */
@@ -528,6 +527,20 @@ static int fsa8500_report_hs(struct fsa8500_data *fsa8500)
 
 	/* Key Long press */
 	if (fsa8500->irq_status[2] & 0x7F) {
+		if ((ktime_to_ms(ktime_get()) - fsa8500->detect_time_ms)
+						< FSA8500_DETECT_DEBOUNCE) {
+			pr_debug("%s: key event < 2 sec. Re-detect headset.\n",
+								__func__);
+			snd_soc_jack_report_no_dapm(fsa8500->hs_jack, 0,
+					fsa8500->hs_jack->jack->type);
+			fsa8500->inserted = 0;
+			fsa8500_reg_write(fsa8500_client,
+					FSA8500_RESET_CONTROL,
+					FSA8500_RESET_DETECT,
+					FSA8500_RESET_DETECT);
+			return 0;
+		}
+
 		status = fsa8500->irq_status[2] & 0x7F;
 		pr_debug("%s:report key 0x%x long press\n", __func__, status);
 		snd_soc_jack_report_no_dapm(fsa8500->button_jack,
@@ -631,6 +644,7 @@ static irqreturn_t fsa8500_irq_handler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+static int lint_counter;
 static void fsa8500_det_thread(struct work_struct *work)
 {
 	u8 tmp_status[5];
@@ -644,26 +658,81 @@ static void fsa8500_det_thread(struct work_struct *work)
 		queue_delayed_work(irq_data->wq, &irq_data->work_det,
 					msecs_to_jiffies(2000));
 		goto skip_report;
-	} else if ((irq_data->irq_status[0] & 0x2) &&
+	} else if ((irq_data->irq_status[0] & 0x20) &&
 			(irq_data->irq_status[0] & 0x7)) {
 		/* LINT detected, delay for 200ms*/
 		memcpy(tmp_status, irq_data->irq_status, sizeof(tmp_status));
 		msleep(FSA8500_LINT_DEBOUNCE);
 		fsa8500_update_device_status(irq_data);
 		if (irq_data->irq_status[0] & 0x18) {
-			/* Disconnect event in 200ms, retry in 2sec */
-			queue_delayed_work(irq_data->wq, &irq_data->work_det,
-					msecs_to_jiffies(2000));
+			lint_counter++;
 			goto skip_report;
 		} else
 			memcpy(irq_data->irq_status,
 				tmp_status, sizeof(tmp_status));
 	}
 
+	if (irq_data->irq_status[0])
+			lint_counter = 0;
 	fsa8500_report_hs(irq_data);
+
 skip_report:
+	if (lint_counter == 5) {
+		/* Disable LINT detect to avoid false detection */
+		pr_info("%s:Too many LINT irq.Disable LINT detection\n",
+								__func__);
+		fsa8500_reg_write(fsa8500_client, FSA8500_CONTROL2,
+					FSA8500_LINT_OFF, FSA8500_LINT_OFF);
+		lint_counter = 0;
+		/* Schedule LINT mode re-enable in 5 min */
+		queue_delayed_work(irq_data->wq, &irq_data->work_restore,
+					msecs_to_jiffies(5 * 60 * 1000));
+	}
 	wake_unlock(&irq_data->wake_lock);
 	mutex_unlock(&irq_data->lock);
+}
+
+static int lint_counter;
+static void fsa8500_restore_thread(struct work_struct *work)
+{
+	struct fsa8500_data *irq_data =
+				i2c_get_clientdata(fsa8500_client);
+
+	mutex_lock(&irq_data->lock);
+	wake_lock(&irq_data->wake_lock);
+
+	pr_info("%s:Re-enable LINT detection\n", __func__);
+	fsa8500_reg_write(fsa8500_client, FSA8500_CONTROL2,
+					0, FSA8500_LINT_OFF);
+	lint_counter = 0;
+	wake_unlock(&irq_data->wake_lock);
+	mutex_unlock(&irq_data->lock);
+}
+
+static void fsa8500_disconnect_thread(struct work_struct *work)
+{
+	struct fsa8500_data *fsa8500 =
+				i2c_get_clientdata(fsa8500_client);
+
+	mutex_lock(&fsa8500->lock);
+	wake_lock(&fsa8500->wake_lock);
+
+	if (fsa8500->inserted) {
+		pr_debug("%s:report HS removal,type %d\n", __func__,
+					fsa8500->hs_acc_type);
+		snd_soc_jack_report_no_dapm(fsa8500->hs_jack, 0,
+					fsa8500->hs_jack->jack->type);
+		if (fsa8500->button_pressed) {
+			pr_debug("%s:report button release\n", __func__);
+			snd_soc_jack_report_no_dapm(fsa8500->button_jack,
+				0, fsa8500->button_jack->jack->type);
+		fsa8500->button_pressed = 0;
+		}
+		fsa8500->inserted = 0;
+	}
+
+	wake_unlock(&fsa8500->wake_lock);
+	mutex_unlock(&fsa8500->lock);
 }
 
 #ifdef CONFIG_OF
@@ -873,6 +942,8 @@ static int fsa8500_probe(struct i2c_client *client,
 	}
 
 	INIT_DELAYED_WORK(&fsa8500->work_det, fsa8500_det_thread);
+	INIT_DELAYED_WORK(&fsa8500->work_restore, fsa8500_restore_thread);
+	INIT_DELAYED_WORK(&fsa8500->work_disconnect, fsa8500_disconnect_thread);
 
 	fsa8500->gpio_irq = gpio_to_irq(fsa8500->gpio);
 	/* active low interrupt */

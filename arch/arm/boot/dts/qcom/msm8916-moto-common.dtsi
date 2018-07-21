@@ -20,6 +20,53 @@
 #include <moto-mem-reserve.h>
 
 / {
+	cpus {
+		CPU0: cpu@0 {
+			current = < 23670 //200000 kHz
+			37830 //400000 kHz
+			47240 //533333 kHz
+			65800 //800000 kHz
+			104550 //998400 kHz
+			113830 //1094400 kHz
+			128540 //1152000 kHz
+			142800 //1209600 kHz
+			157750>; //1363200 kHz
+		};
+		CPU1: cpu@1 {
+			current = < 23670 //200000 kHz
+			37830 //400000 kHz
+			47240 //533333 kHz
+			65800 //800000 kHz
+			104550 //998400 kHz
+			113830 //1094400 kHz
+			128540 //1152000 kHz
+			142800 //1209600 kHz
+			157750>; //1363200 kHz
+		};
+		CPU2: cpu@2 {
+			current = < 23670 //200000 kHz
+			37830 //400000 kHz
+			47240 //533333 kHz
+			65800 //800000 kHz
+			104550 //998400 kHz
+			113830 //1094400 kHz
+			128540 //1152000 kHz
+			142800 //1209600 kHz
+			157750>; //1363200 kHz
+		};
+		CPU3: cpu@3 {
+			current = < 23670 //200000 kHz
+			37830 //400000 kHz
+			47240 //533333 kHz
+			65800 //800000 kHz
+			104550 //998400 kHz
+			113830 //1094400 kHz
+			128540 //1152000 kHz
+			142800 //1209600 kHz
+			157750>; //1363200 kHz
+		};
+	};
+
 	aliases {
 		serial0 = &blsp1_ls_uart1;
 		spi4 = &spi_4; /* SPI4 controller device */
@@ -179,6 +226,7 @@
 
 &sdhc_1 {
 	vdd-supply = <&pm8916_l8>;
+	qcom,vdd-always-on;
 	qcom,vdd-voltage-level = <2900000 2900000>;
 	qcom,vdd-current-level = <200 400000>;
 
@@ -1008,7 +1056,8 @@
 };
 
 &pm8916_chg {
-	status = "disabled";
+	status = "ok";
+	qcom,use-external-charger;
 };
 
 &pm8916_bms {

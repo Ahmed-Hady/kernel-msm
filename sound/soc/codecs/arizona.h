@@ -100,14 +100,10 @@ extern int arizona_mixer_values[ARIZONA_NUM_MIXER_INPUTS];
 #define ARIZONA_MIXER_CONTROLS(name, base) \
 	SOC_SINGLE_RANGE_TLV(name " Input 1 Volume", base + 1,		\
 			     ARIZONA_MIXER_VOL_SHIFT, 0x20, 0x50, 0,	\
-			     arizona_mixer_tlv),			\
-	SOC_SINGLE_RANGE_TLV(name " Input 2 Volume", base + 3,		\
-			     ARIZONA_MIXER_VOL_SHIFT, 0x20, 0x50, 0,	\
-			     arizona_mixer_tlv),			\
-	SOC_SINGLE_RANGE_TLV(name " Input 3 Volume", base + 5,		\
-			     ARIZONA_MIXER_VOL_SHIFT, 0x20, 0x50, 0,	\
-			     arizona_mixer_tlv),			\
-	SOC_SINGLE_RANGE_TLV(name " Input 4 Volume", base + 7,		\
+			     arizona_mixer_tlv)
+
+#define ARIZONA_MIXER_2_CONTROLS(name, base) \
+	SOC_SINGLE_RANGE_TLV(name " Input 2 Volume", base + 1,		\
 			     ARIZONA_MIXER_VOL_SHIFT, 0x20, 0x50, 0,	\
 			     arizona_mixer_tlv)
 
@@ -145,10 +141,10 @@ extern int arizona_mixer_values[ARIZONA_NUM_MIXER_INPUTS];
 
 #define ARIZONA_MIXER_WIDGETS(name, name_str)	\
 	ARIZONA_MUX(name_str " Input 1", &name##_in1_mux), \
-	ARIZONA_MUX(name_str " Input 2", &name##_in2_mux), \
-	ARIZONA_MUX(name_str " Input 3", &name##_in3_mux), \
-	ARIZONA_MUX(name_str " Input 4", &name##_in4_mux), \
 	SND_SOC_DAPM_MIXER(name_str " Mixer", SND_SOC_NOPM, 0, 0, NULL, 0)
+
+#define ARIZONA_MIXER_2_WIDGETS(name, name_str)	\
+	ARIZONA_MUX(name_str " Input 2", &name##_in2_mux)
 
 #define ARIZONA_DSP_WIDGETS(name, name_str) \
 	ARIZONA_MIXER_WIDGETS(name##L, name_str "L"), \
@@ -167,13 +163,11 @@ extern int arizona_mixer_values[ARIZONA_NUM_MIXER_INPUTS];
 #define ARIZONA_MIXER_ROUTES(widget, name) \
 	{ widget, NULL, name " Mixer" },         \
 	{ name " Mixer", NULL, name " Input 1" }, \
+	ARIZONA_MIXER_INPUT_ROUTES(name " Input 1")
+
+#define ARIZONA_MIXER_2_ROUTES(widget, name) \
 	{ name " Mixer", NULL, name " Input 2" }, \
-	{ name " Mixer", NULL, name " Input 3" }, \
-	{ name " Mixer", NULL, name " Input 4" }, \
-	ARIZONA_MIXER_INPUT_ROUTES(name " Input 1"), \
-	ARIZONA_MIXER_INPUT_ROUTES(name " Input 2"), \
-	ARIZONA_MIXER_INPUT_ROUTES(name " Input 3"), \
-	ARIZONA_MIXER_INPUT_ROUTES(name " Input 4")
+	ARIZONA_MIXER_INPUT_ROUTES(name " Input 2")
 
 #define ARIZONA_DSP_ROUTES(name) \
 	{ name, NULL, name " Preloader"}, \
@@ -283,6 +277,7 @@ struct arizona_fll {
 	unsigned int sync_freq;
 	int ref_src;
 	unsigned int ref_freq;
+	struct mutex lock;
 
 	char lock_name[ARIZONA_FLL_NAME_LEN];
 	char clock_ok_name[ARIZONA_FLL_NAME_LEN];
@@ -294,11 +289,15 @@ extern int arizona_set_fll_refclk(struct arizona_fll *fll, int source,
 				  unsigned int Fref, unsigned int Fout);
 extern int arizona_set_fll(struct arizona_fll *fll, int source,
 			   unsigned int Fref, unsigned int Fout);
+extern int arizona_get_fll(struct arizona_fll *fll, int *source,
+			   unsigned int *Fref, unsigned int *Fout);
+
 
 extern int arizona_init_spk(struct snd_soc_codec *codec);
 extern int arizona_init_gpio(struct snd_soc_codec *codec);
 extern int arizona_init_mono(struct snd_soc_codec *codec);
 extern int arizona_init_input(struct snd_soc_codec *codec);
+extern int arizona_init_codec(struct snd_soc_codec *codec);
 
 extern int arizona_init_dai(struct arizona_priv *priv, int dai);
 

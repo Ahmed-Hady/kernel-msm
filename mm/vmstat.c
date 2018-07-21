@@ -743,6 +743,7 @@ const char * const vmstat_text[] = {
 	"nr_anon_transparent_hugepages",
 	"nr_free_cma",
 	"nr_ion",
+	"nr_ion_pool",
 	"nr_ion_cma",
 	"nr_dirty_threshold",
 	"nr_dirty_background_threshold",
@@ -1279,7 +1280,8 @@ int sysctl_stat_interval __read_mostly = HZ;
 static void vmstat_update(struct work_struct *w)
 {
 	refresh_cpu_vm_stats(smp_processor_id());
-	schedule_delayed_work(&__get_cpu_var(vmstat_work),
+	schedule_delayed_work_on(smp_processor_id(),
+		&__get_cpu_var(vmstat_work),
 		round_jiffies_relative(sysctl_stat_interval));
 }
 

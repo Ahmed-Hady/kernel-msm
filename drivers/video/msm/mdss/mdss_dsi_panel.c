@@ -33,6 +33,7 @@
 #define MDSS_PANEL_DEFAULT_VER 0xffffffffffffffff
 #define MDSS_PANEL_UNKNOWN_NAME "unknown"
 #define DT_CMD_HDR 6
+#define MDSS_PWR_ON_RETRIES 5
 
 /* NT35596 panel specific status variables */
 #define NT35596_BUF_3_STATUS 0x02
@@ -485,8 +486,10 @@ int mdss_panel_parse_panel_config_dt(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 		(panel_ver & 0xff0000) >> 16,
 		ctrl_pdata->panel_config.panel_ver);
 
-	panelinfo.panel_name = (char *) &ctrl_pdata->panel_config.panel_name;
-	panelinfo.panel_ver = &ctrl_pdata->panel_config.panel_ver;
+	ctrl_pdata->panel_data.panel_info.panel_ver = panel_ver;
+	strlcpy(ctrl_pdata->panel_data.panel_info.panel_family_name,
+		ctrl_pdata->panel_config.panel_name,
+		sizeof(ctrl_pdata->panel_data.panel_info.panel_family_name));
 
 	of_node_put(np);
 
@@ -752,6 +755,7 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 	u8 pwr_mode = 0;
 	char *dropbox_issue = NULL;
 	static int dropbox_count;
+	static int panel_recovery_retry;
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -784,7 +788,14 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 		pr_err("%s: Display failure: DISON (0x04) bit not set\n",
 								__func__);
 		dropbox_issue = MDSS_DROPBOX_MSG_PWR_MODE_BLACK;
-	}
+
+		if (panel_recovery_retry++ > MDSS_PWR_ON_RETRIES) {
+			pr_err("%s: panel recovery failed for all retries",
+				__func__);
+			BUG();
+		}
+	} else
+		panel_recovery_retry = 0;
 
 end:
 	pinfo->blank_state = MDSS_PANEL_BLANK_UNBLANK;
@@ -800,6 +811,23 @@ end:
 
 	pr_info("%s-. Pwr_mode(0x0A) = 0x%x\n", __func__, pwr_mode);
 	return 0;
+}
+
+static void mdss_dsi_panel_off_in_prog_notify(struct mdss_panel_data *pdata,
+					struct mdss_panel_info *pinfo)
+{
+	struct fb_event event;
+	int blank;
+	struct fb_info *fbi;
+
+	if (!pinfo->blank_progress_notify_enabled)
+		return;
+
+	fbi = pdata->mfd->fbi;
+	blank = FB_BLANK_POWERDOWN;
+	event.info = fbi;
+	event.data = &blank;
+	fb_notifier_call_chain(FB_IN_PROGRESS_EVENT_BLANK, &event);
 }
 
 static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
@@ -831,6 +859,8 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 
 	if (ctrl->off_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds);
+
+	mdss_dsi_panel_off_in_prog_notify(pdata, pinfo);
 
 end:
 	pinfo->blank_state = MDSS_PANEL_BLANK_BLANK;
@@ -2002,12 +2032,16 @@ static int mdss_panel_parse_dt(struct device_node *np,
 
 	data = of_get_property(np, "qcom,mdss-dsi-panel-supplier", NULL);
 	if (!data)
-		memset(pinfo->supplier, '\0', sizeof(pinfo->supplier));
-	else if (strlcpy(pinfo->supplier, data, sizeof(pinfo->supplier)) >=
-		sizeof(pinfo->supplier)) {
+		memset(pinfo->panel_supplier, '\0',
+			sizeof(pinfo->panel_supplier));
+	else if (strlcpy(pinfo->panel_supplier, data,
+		sizeof(pinfo->panel_supplier)) >=
+		sizeof(pinfo->panel_supplier)) {
 		pr_err("%s: Panel supplier name too large\n", __func__);
 	}
-	panelinfo.panel_supplier = pinfo->supplier;
+
+	pinfo->blank_progress_notify_enabled = of_property_read_bool(np,
+				"qcom,mdss-dsi-use-blank-in-progress-notifier");
 
 	if (mdss_panel_parse_optional_prop(np, pinfo, ctrl_pdata))
 		pr_err("Error parsing optional properties\n");

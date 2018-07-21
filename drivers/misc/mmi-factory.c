@@ -25,6 +25,7 @@
 #include <linux/reboot.h>
 #include <linux/slab.h>
 #include <linux/qpnp/power-on.h>
+#include <linux/delay.h>
 #include <soc/qcom/watchdog.h>
 
 
@@ -117,18 +118,24 @@ static DEVICE_ATTR(fac_kill_sw_dis, 0664,
  */
 static bool mmi_factory_cable_present(void)
 {
-	struct device_node *np;
-	bool fact_cable;
+	struct device_node *np = of_find_node_by_path("/chosen");
+	u32 fact_cable = 0;
 
-	np = of_find_node_by_path("/chosen");
-	fact_cable = of_property_read_bool(np, "mmi,factory-cable");
+	if (np)
+		of_property_read_u32(np, "mmi,factory-cable", &fact_cable);
+
 	of_node_put(np);
-
-	if (!np || !fact_cable)
-		return false;
-
-	return true;
+	return !!fact_cable ? true : false;
 }
+
+static int is_secure;
+int __init secure_hardware_init(char *s)
+{
+	is_secure = !strncmp(s, "1", 1);
+
+	return 1;
+}
+__setup("androidboot.secure_hardware=", secure_hardware_init);
 
 static void warn_irq_w(struct work_struct *w)
 {
@@ -144,7 +151,7 @@ static void warn_irq_w(struct work_struct *w)
 
 #ifdef CONFIG_QPNP_POWER_ON
 		/* trigger wdog if resin key pressed */
-		if (qpnp_pon_key_status & QPNP_PON_KEY_RESIN_BIT) {
+		if (qpnp_pon_key_status & QPNP_PON_KEY_RESIN_BIT && !is_secure) {
 			pr_info("User triggered watchdog reset(Pwr + VolDn)\n");
 			msm_trigger_wdog_bite();
 			return;
@@ -289,7 +296,7 @@ static int mmi_factory_probe(struct platform_device *pdev)
 	const struct of_device_id *match;
 	struct mmi_factory_info *info;
 	int ret;
-	int i;
+	int i, warn_line;
 
 	match = of_match_device(mmi_factory_of_tbl, &pdev->dev);
 	if (!match) {
@@ -341,6 +348,21 @@ static int mmi_factory_probe(struct platform_device *pdev)
 	} else {
 		dev_err(&pdev->dev, "failed to find device match\n");
 		goto fail;
+	}
+
+	/* Toggle factory kill disable line */
+	warn_line = gpio_get_value(info->list[KP_WARN_INDEX].gpio);
+
+	if (!warn_line && !info->factory_cable) {
+		gpio_direction_output(info->list[KP_KILL_INDEX].gpio, 1);
+		udelay(50);
+		gpio_direction_output(info->list[KP_KILL_INDEX].gpio, 0);
+		udelay(50);
+		gpio_direction_output(info->list[KP_KILL_INDEX].gpio, 1);
+		udelay(50);
+		gpio_direction_output(info->list[KP_KILL_INDEX].gpio, 0);
+		udelay(50);
+		gpio_direction_output(info->list[KP_KILL_INDEX].gpio, 1);
 	}
 
 	if ((info->dev == KUNGPOW) && (info->num_gpios == KP_NUM_GPIOS)) {

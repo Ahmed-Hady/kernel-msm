@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -33,6 +33,7 @@
 #include <linux/coresight-cti.h>
 #include <linux/moduleparam.h>
 #include <linux/sched.h>
+#include <linux/cpu_pm.h>
 #include <soc/qcom/spm.h>
 #include <soc/qcom/pm.h>
 #include <soc/qcom/rpm-notifier.h>
@@ -214,7 +215,13 @@ int set_l2_mode(struct low_power_ops *ops, int mode, bool notify_rpm)
 		lpm = MSM_SPM_MODE_DISABLED;
 		break;
 	}
-	rc = msm_spm_config_low_power_mode(ops->spm, lpm, true);
+
+	/* Do not program L2 SPM enable bit. This will be set by TZ */
+	if (lpm_wa_get_skip_l2_spm())
+		rc = msm_spm_config_low_power_mode_addr(ops->spm, lpm,
+							true);
+	else
+		rc = msm_spm_config_low_power_mode(ops->spm, lpm, true);
 
 	if (rc)
 		pr_err("%s: Failed to set L2 low power mode %d, ERR %d",
@@ -471,6 +478,10 @@ static int cluster_configure(struct lpm_cluster *cluster, int idx,
 				level->notify_rpm);
 		if (ret)
 			goto failed_set_mode;
+
+		if (level->mode[i] == MSM_SPM_MODE_POWER_COLLAPSE)
+			cpu_cluster_pm_enter(cluster->aff_level);
+
 	}
 	if (level->notify_rpm) {
 		struct cpumask nextcpu;
@@ -589,13 +600,6 @@ static void cluster_unprepare(struct lpm_cluster *cluster,
 	level = &cluster->levels[cluster->last_level];
 	if (level->notify_rpm) {
 		msm_rpm_exit_sleep();
-
-		/* If RPM bumps up CX to turbo, unvote CX turbo vote
-		 * during exit of rpm assisted power collapse to
-		 * reduce the power impact
-		 */
-
-		lpm_wa_cx_unvote_send();
 		msm_mpm_exit_sleep(from_idle);
 	}
 
@@ -615,6 +619,11 @@ static void cluster_unprepare(struct lpm_cluster *cluster,
 				level->mode[i],
 				level->notify_rpm);
 		BUG_ON(ret);
+
+		if (cluster->levels[last_level].mode[i] ==
+				MSM_SPM_MODE_POWER_COLLAPSE)
+			cpu_cluster_pm_exit(cluster->aff_level);
+
 	}
 unlock_return:
 	spin_unlock(&cluster->sync_lock);

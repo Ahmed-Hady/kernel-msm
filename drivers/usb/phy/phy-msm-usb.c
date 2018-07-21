@@ -81,6 +81,8 @@
 #define ID_VOLTS_DEFAULT        1000000  /* 1000 mV */
 #define MAX_CHGR_RETRY_COUNT    3
 
+#define USB_DEFAULT_SYSTEM_CLOCK 80000000	/* 80 MHz */
+
 enum msm_otg_phy_reg_mode {
 	USB_PHY_REG_OFF,
 	USB_PHY_REG_ON,
@@ -254,6 +256,9 @@ static int msm_hsusb_ldo_enable(struct msm_otg *motg,
 		break;
 
 	case USB_PHY_REG_OFF:
+		if (motg->phy.flags & PHY_RM_PULLDOWN)
+			return 0;
+
 		ret = regulator_disable(hsusb_1p8);
 		if (ret) {
 			dev_err(motg->phy.dev, "%s: unable to disable the hsusb 1p8\n",
@@ -300,6 +305,8 @@ static int msm_hsusb_ldo_enable(struct msm_otg *motg,
 		break;
 
 	case USB_PHY_REG_LPM_OFF:
+		if (motg->phy.flags & PHY_RM_PULLDOWN)
+			return 0;
 		ret = regulator_set_optimum_mode(hsusb_1p8,
 				USB_PHY_1P8_HPM_LOAD);
 		if (ret < 0) {
@@ -353,6 +360,10 @@ static int ulpi_read(struct usb_phy *phy, u32 reg)
 	struct msm_otg *motg = container_of(phy, struct msm_otg, phy);
 	int cnt = 0;
 
+	if (motg->lpm_flags) {
+		dev_err(phy->dev, "ulpi_read: phy in lpm\n");
+		return -ENODEV;
+	}
 	/* initiate read operation */
 	writel(ULPI_RUN | ULPI_READ | ULPI_ADDR(reg),
 	       USB_ULPI_VIEWPORT);
@@ -380,6 +391,10 @@ static int ulpi_write(struct usb_phy *phy, u32 val, u32 reg)
 	struct msm_otg *motg = container_of(phy, struct msm_otg, phy);
 	int cnt = 0;
 
+	if (motg->lpm_flags) {
+		dev_err(phy->dev, "ulpi_write: phy in lpm\n");
+		return -ENODEV;
+	}
 	/* initiate write operation */
 	writel(ULPI_RUN | ULPI_WRITE |
 	       ULPI_ADDR(reg) | ULPI_DATA(val),
@@ -407,7 +422,7 @@ static struct usb_phy_io_ops msm_otg_io_ops = {
 	.write = ulpi_write,
 };
 
-static void ulpi_init(struct msm_otg *motg)
+static void ulpi_init(struct msm_otg *motg, bool host)
 {
 	struct msm_otg_platform_data *pdata = motg->pdata;
 	int aseq[10];
@@ -418,9 +433,11 @@ static void ulpi_init(struct msm_otg *motg)
 				override_phy_init);
 		get_options(override_phy_init, ARRAY_SIZE(aseq), aseq);
 		seq = &aseq[1];
-	} else {
+	} else if (host)
+		seq = pdata->phy_host_init_seq;
+	else
 		seq = pdata->phy_init_seq;
-	}
+
 
 	if (!seq)
 		return;
@@ -687,7 +704,7 @@ static int msm_otg_reset(struct usb_phy *phy)
 	msm_usb_phy_reset(motg);
 
 	/* Program USB PHY Override registers. */
-	ulpi_init(motg);
+	ulpi_init(motg, false);
 
 	/*
 	 * It is required to reset USB PHY after programming
@@ -1896,6 +1913,11 @@ static void msm_otg_start_host(struct usb_otg *otg, int on)
 	if (on) {
 		dev_dbg(otg->phy->dev, "host on\n");
 
+		if (pdata->phy_host_init_seq) {
+			ulpi_init(motg, true);
+			msm_otg_phy_reset(motg);
+		}
+
 		if (pdata->otg_control == OTG_PHY_CONTROL)
 			ulpi_write(otg->phy, OTG_COMP_DISABLE,
 				ULPI_SET(ULPI_PWR_CLK_MNG_REG));
@@ -1912,6 +1934,9 @@ static void msm_otg_start_host(struct usb_otg *otg, int on)
 		if (pdata->otg_control == OTG_PHY_CONTROL)
 			ulpi_write(otg->phy, OTG_COMP_DISABLE,
 				ULPI_CLR(ULPI_PWR_CLK_MNG_REG));
+
+		/* Clear the reset counter for reverting to default tuning */
+		motg->reset_counter = 0;
 	}
 }
 
@@ -4437,8 +4462,11 @@ static int otg_power_set_property_usb(struct power_supply *psy,
 		 * does not exist in power supply enum and it
 		 * gets overridden as DCP.
 		 */
-		if (motg->chg_state == USB_CHG_STATE_DETECTED)
+		if (motg->chg_state == USB_CHG_STATE_DETECTED) {
+			if (psy->type == POWER_SUPPLY_TYPE_UNKNOWN)
+				psy->type = POWER_SUPPLY_TYPE_USB;
 			break;
+		}
 
 		switch (psy->type) {
 		case POWER_SUPPLY_TYPE_USB:
@@ -4468,6 +4496,21 @@ static int otg_power_set_property_usb(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_HEALTH:
 		motg->usbin_health = val->intval;
 		break;
+	/* PMIC notification to remove pull down on Dp and Dm */
+	case POWER_SUPPLY_PROP_ALLOW_DETECTION:
+		if (!!(motg->phy.flags & PHY_RM_PULLDOWN) == val->intval)
+			break;
+
+		if (val->intval) {
+			msm_hsusb_ldo_enable(motg, USB_PHY_REG_ON);
+			motg->phy.flags |= PHY_RM_PULLDOWN;
+		} else {
+			motg->phy.flags &= ~PHY_RM_PULLDOWN;
+			msm_hsusb_ldo_enable(motg, USB_PHY_REG_OFF);
+		}
+
+		dev_dbg(motg->phy.dev, "RM Pulldown %d\n", val->intval);
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -4485,6 +4528,7 @@ static int otg_power_property_is_writeable_usb(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_ONLINE:
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
 	case POWER_SUPPLY_PROP_CURRENT_MAX:
+	case POWER_SUPPLY_PROP_ALLOW_DETECTION:
 		return 1;
 	default:
 		break;
@@ -4651,6 +4695,7 @@ static struct platform_device *msm_otg_add_pdev(
 		ci_pdata.l1_supported = otg_pdata->l1_supported;
 		ci_pdata.enable_ahb2ahb_bypass =
 				otg_pdata->enable_ahb2ahb_bypass;
+		ci_pdata.system_clk = otg_pdata->system_clk;
 		retval = platform_device_add_data(pdev, &ci_pdata,
 			sizeof(ci_pdata));
 		if (retval)
@@ -4985,14 +5030,13 @@ static DEVICE_ATTR(id_state, S_IRUGO, id_state_show, NULL);
 static bool msm_otg_mmi_factory(void)
 {
 	struct device_node *np = of_find_node_by_path("/chosen");
-	bool factory = false;
+	u32 fact_cable = 0;
 
 	if (np)
-		factory = of_property_read_bool(np, "mmi,factory-cable");
+		of_property_read_u32(np, "mmi,factory-cable", &fact_cable);
 
 	of_node_put(np);
-
-	return factory;
+	return !!fact_cable ? true : false;
 }
 
 struct msm_otg_platform_data *msm_otg_dt_to_pdata(struct platform_device *pdev)
@@ -5023,6 +5067,20 @@ struct msm_otg_platform_data *msm_otg_dt_to_pdata(struct platform_device *pdev)
 				pdata->phy_init_seq,
 				len/sizeof(*pdata->phy_init_seq));
 	}
+
+	len = 0;
+	of_get_property(node, "qcom,hsusb-otg-host-phy-init-seq", &len);
+	if (len) {
+		pdata->phy_host_init_seq = devm_kzalloc(&pdev->dev, len,
+								GFP_KERNEL);
+		if (!pdata->phy_host_init_seq)
+			return NULL;
+		of_property_read_u32_array(node,
+				"qcom,hsusb-otg-host-phy-init-seq",
+				pdata->phy_host_init_seq,
+				len/sizeof(*pdata->phy_host_init_seq));
+	}
+
 	of_property_read_u32(node, "qcom,hsusb-otg-power-budget",
 				&pdata->power_budget);
 	of_property_read_u32(node, "qcom,hsusb-otg-mode",
@@ -5135,7 +5193,8 @@ static int msm_otg_probe(struct platform_device *pdev)
 	 * Get Max supported clk frequency for USB Core CLK and request
 	 * to set the same.
 	 */
-	motg->core_clk_rate = clk_round_rate(motg->core_clk, LONG_MAX);
+	motg->core_clk_rate = clk_round_rate(motg->core_clk,
+		USB_DEFAULT_SYSTEM_CLOCK);
 	if (IS_ERR_VALUE(motg->core_clk_rate)) {
 		dev_err(&pdev->dev, "fail to get core clk max freq.\n");
 	} else {
@@ -5278,6 +5337,8 @@ static int msm_otg_probe(struct platform_device *pdev)
 			msm_otg_bus_vote(motg, USB_MIN_PERF_VOTE);
 		}
 	}
+
+	pdata->system_clk = motg->core_clk;
 
 	ret = msm_otg_bus_freq_get(motg->phy.dev, motg);
 	if (ret)

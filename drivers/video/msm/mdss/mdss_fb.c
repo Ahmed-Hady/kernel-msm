@@ -68,8 +68,6 @@
 static struct fb_info *fbi_list[MAX_FBI_LIST];
 static int fbi_list_index;
 
-struct sys_panelinfo panelinfo = {NULL, NULL, NULL};
-
 static u32 mdss_fb_pseudo_palette[16] = {
 	0x00000000, 0xffffffff, 0xffffffff, 0xffffffff,
 	0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
@@ -690,44 +688,64 @@ static struct attribute_group mdss_fb_attr_group = {
 	.attrs = mdss_fb_attrs,
 };
 
+static struct mdss_panel_info *get_panel_info(struct device *dev)
+{
+	struct fb_info *fbi = dev_get_drvdata(dev);
+	struct msm_fb_data_type *mfd = fbi->par;
+	struct mdss_panel_info *pinfo = mfd->panel_info;
+
+	return pinfo;
+}
+
 static ssize_t panel_name_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
-	return snprintf(buf, PAGE_SIZE, "%s\n", panelinfo.panel_name);
+	struct mdss_panel_info *pinfo = get_panel_info(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%s\n", pinfo->panel_family_name);
 }
 
 static ssize_t panel_ver_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
-	return snprintf(buf, PAGE_SIZE, "0x%016llx\n", *panelinfo.panel_ver);
+	struct mdss_panel_info *pinfo = get_panel_info(dev);
+
+	return snprintf(buf, PAGE_SIZE, "0x%08x\n", pinfo->panel_ver);
 }
 
 static ssize_t panel_supplier_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
-	return snprintf(buf, PAGE_SIZE, "%s\n", panelinfo.panel_supplier);
+	struct mdss_panel_info *pinfo = get_panel_info(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%s\n", pinfo->panel_supplier);
 }
 
 static ssize_t panel_man_id_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
-	u32 panel_ver = (u32)(*panelinfo.panel_ver);
-	return snprintf(buf, PAGE_SIZE, "0x%02x\n", panel_ver & 0xff);
+	struct mdss_panel_info *pinfo = get_panel_info(dev);
+
+	return snprintf(buf, PAGE_SIZE, "0x%02x\n",
+		pinfo->panel_ver & 0xff);
 }
 
 static ssize_t panel_controller_ver_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
-	u32 panel_ver = (u32)(*panelinfo.panel_ver);
-	return snprintf(buf, PAGE_SIZE, "0x%02x\n", (panel_ver & 0xff00) >> 8);
+	struct mdss_panel_info *pinfo = get_panel_info(dev);
+
+	return snprintf(buf, PAGE_SIZE, "0x%02x\n",
+		(pinfo->panel_ver & 0xff00) >> 8);
 }
 
 static ssize_t panel_controller_drv_ver_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
-	u32 panel_ver = (u32)(*panelinfo.panel_ver);
+	struct mdss_panel_info *pinfo = get_panel_info(dev);
+
 	return snprintf(buf, PAGE_SIZE, "0x%02x\n",
-		(panel_ver & 0xff0000) >> 16);
+		(pinfo->panel_ver & 0xff0000) >> 16);
 }
 
 static DEVICE_ATTR(panel_name, S_IRUGO,
@@ -819,6 +837,7 @@ static int mdss_fb_probe(struct platform_device *pdev)
 	}
 
 	mfd = (struct msm_fb_data_type *)fbi->par;
+	pdata->mfd = mfd;
 	mfd->key = MFD_KEY;
 	mfd->fbi = fbi;
 	mfd->panel_info = &pdata->panel_info;
@@ -2235,10 +2254,11 @@ static int mdss_fb_release_all(struct fb_info *info, bool release_all)
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
 	struct mdss_fb_proc_info *pinfo = NULL, *temp_pinfo = NULL;
 	struct mdss_fb_proc_info *proc_info = NULL;
-	int ret = 0;
+	int blank, ret = 0;
 	int pid = current->tgid;
 	bool unknown_pid = true, release_needed = false;
 	struct task_struct *task = current->group_leader;
+	struct fb_event event;
 
 	if (!mfd->ref_cnt) {
 		pr_info("try to close unopened fb %d! from %s\n", mfd->index,
@@ -2347,13 +2367,22 @@ static int mdss_fb_release_all(struct fb_info *info, bool release_all)
 		if (mfd->fb_ion_handle)
 			mdss_fb_free_fb_ion_memory(mfd);
 
+		blank = FB_BLANK_POWERDOWN;
+		event.info = info;
+		event.data = &blank;
+
+		fb_notifier_call_chain(FB_EARLY_EVENT_BLANK, &event);
+
 		ret = mdss_fb_blank_sub(FB_BLANK_POWERDOWN, info,
 			mfd->op_enable);
 		if (ret) {
+			fb_notifier_call_chain(FB_R_EARLY_EVENT_BLANK, &event);
 			pr_err("can't turn off fb%d! rc=%d current process=%s pid=%d known pid=%d\n",
 			      mfd->index, ret, task->comm, current->tgid, pid);
 			return ret;
-		}
+		} else
+			fb_notifier_call_chain(FB_EVENT_BLANK, &event);
+
 		atomic_set(&mfd->ioctl_ref_cnt, 0);
 	}
 

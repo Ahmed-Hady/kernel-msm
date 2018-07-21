@@ -278,6 +278,7 @@ enum usb_ctrl {
  */
 struct msm_otg_platform_data {
 	int *phy_init_seq;
+	int *phy_host_init_seq;
 	int (*vbus_power)(bool on);
 	unsigned power_budget;
 	enum usb_mode_type mode;
@@ -311,6 +312,7 @@ struct msm_otg_platform_data {
 	unsigned int mpp_id_amux_chan;
 	unsigned int mpp_id_pull;
 	unsigned int mpp_id_vin;
+	struct clk *system_clk;
 };
 
 /* phy related flags */
@@ -319,6 +321,7 @@ struct msm_otg_platform_data {
 #define PHY_HOST_MODE			BIT(2)
 #define PHY_CHARGER_CONNECTED		BIT(3)
 #define PHY_VBUS_VALID_OVERRIDE		BIT(4)
+#define PHY_RM_PULLDOWN			BIT(5)
 
 /* Timeout (in msec) values (min - max) associated with OTG timers */
 
@@ -571,6 +574,7 @@ struct ci13xxx_platform_data {
 	void *prv_data;
 	bool l1_supported;
 	bool enable_ahb2ahb_bypass;
+	struct clk *system_clk;
 };
 
 /**

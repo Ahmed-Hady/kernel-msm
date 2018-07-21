@@ -69,6 +69,13 @@ dtb-$(CONFIG_ARCH_MSM8916) += msm8916-sim.dtb \
 	msm8939-mtp-jdi.dtb \
 	msm8939-mtp-smb1360.dtb \
 	msm8939-mtp-wcd9306.dtb \
+	msm8939-v3.0-qrd-skuk.dtb \
+	msm8939-v3.0-cdp.dtb \
+	msm8939-v3.0-cdp-jdi.dtb \
+	msm8939-v3.0-mtp.dtb \
+	msm8939-v3.0-mtp-jdi.dtb \
+	msm8939-v3.0-mtp-smb1360.dtb \
+	msm8939-v3.0-mtp-wcd9306.dtb \
 	msm8936-qrd-skuk.dtb \
 	msm8936-cdp.dtb \
 	msm8936-cdp-smb1360.dtb \
@@ -243,12 +250,18 @@ dtb-$(CONFIG_ARCH_MSM8916) += msm8916-osprey-p2ad.dtb
 dtb-$(CONFIG_ARCH_MSM8916) += msm8916-osprey-p2b.dtb
 dtb-$(CONFIG_ARCH_MSM8916) += msm8916-osprey-p2bd.dtb
 
-# Motorola 8936 Devices
+# Motorola 8939 Devices
 dtb-$(CONFIG_ARCH_MSM8916) += msm8939-lux-p0.dtb
 dtb-$(CONFIG_ARCH_MSM8916) += msm8939-lux-p1.dtb
 dtb-$(CONFIG_ARCH_MSM8916) += msm8939-lux-p1b.dtb
 dtb-$(CONFIG_ARCH_MSM8916) += msm8939-lux-p1c.dtb
 dtb-$(CONFIG_ARCH_MSM8916) += msm8939-lux-p2a.dtb
+dtb-$(CONFIG_ARCH_MSM8916) += msm8939-lux-p2c.dtb
+
+# Merlin
+dtb-$(CONFIG_ARCH_MSM8916) += msm8939-merlin-p0.dtb
+dtb-$(CONFIG_ARCH_MSM8916) += msm8939-merlin-p1.dtb
+dtb-$(CONFIG_ARCH_MSM8916) += msm8939-merlin-p1v3.dtb
 
 ifeq ($(CONFIG_MMI_DEVICE_DTBS),y)
 # Add 1k of padding to the DTBs to allow for environment variables
