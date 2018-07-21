@@ -481,6 +481,10 @@ static int hw_ep_flush(int num, int dir)
 					dir ? "IN" : "OUT");
 				debug_ept_flush_info(num, dir);
 				_udc->skip_flush = true;
+				/* Notify to trigger h/w reset recovery later */
+				if (_udc->udc_driver->notify_event)
+					_udc->udc_driver->notify_event(_udc,
+						CI13XXX_CONTROLLER_ERROR_EVENT);
 				return 0;
 			}
 		}
@@ -4019,9 +4023,10 @@ static int udc_probe(struct ci13xxx_udc_driver *driver, struct device *dev,
 
 	_udc = udc;
 	return retval;
-
+#ifdef CONFIG_USB_GADGET_DEBUG_FILES
 del_udc:
 	usb_del_gadget_udc(&udc->gadget);
+#endif
 remove_trans:
 	if (udc->transceiver)
 		otg_set_peripheral(udc->transceiver->otg, &udc->gadget);

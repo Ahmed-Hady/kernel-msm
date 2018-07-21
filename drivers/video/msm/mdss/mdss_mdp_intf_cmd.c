@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -18,6 +18,8 @@
 #include "mdss_panel.h"
 #include "mdss_debug.h"
 #include "mdss_mdp_trace.h"
+
+#include "mdss_timeout.h"
 
 #define VSYNC_EXPIRE_TICK 6
 
@@ -966,20 +968,19 @@ int mdss_mdp_cmd_stop(struct mdss_mdp_ctl *ctl, int panel_power_state)
 {
 	struct mdss_mdp_cmd_ctx *ctx = ctl->priv_data;
 	struct mdss_mdp_ctl *sctl = mdss_mdp_get_split_ctl(ctl);
-	int ret = 0;
+	int ret;
 
 	if (!ctx) {
 		pr_err("invalid ctx\n");
 		return -ENODEV;
 	}
 
-	mutex_lock(&ctl->offlock);
 	if (ctx->panel_power_state != panel_power_state) {
 		ret = mdss_mdp_cmd_stop_sub(ctl, panel_power_state);
 		if (IS_ERR_VALUE(ret)) {
 			pr_err("%s: unable to stop interface: %d\n",
 					__func__, ret);
-			goto end;
+			return ret;
 		}
 
 		if (sctl) {
@@ -987,10 +988,11 @@ int mdss_mdp_cmd_stop(struct mdss_mdp_ctl *ctl, int panel_power_state)
 			if (IS_ERR_VALUE(ret)) {
 				pr_err("%s: unable to stop slave intf: %d\n",
 						__func__, ret);
-				goto end;
+				return ret;
 			}
 		}
 
+		mutex_lock(&ctl->offlock);
 		ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_BLANK,
 				(void *) (long int) panel_power_state);
 		WARN(ret, "intf %d unblank error (%d)\n", ctl->intf_num, ret);
@@ -998,6 +1000,7 @@ int mdss_mdp_cmd_stop(struct mdss_mdp_ctl *ctl, int panel_power_state)
 		ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_PANEL_OFF,
 				(void *) (long int) panel_power_state);
 		WARN(ret, "intf %d unblank error (%d)\n", ctl->intf_num, ret);
+		mutex_unlock(&ctl->offlock);
 	}
 
 	ctx->panel_power_state = panel_power_state;
@@ -1017,10 +1020,23 @@ int mdss_mdp_cmd_stop(struct mdss_mdp_ctl *ctl, int panel_power_state)
 end:
 	MDSS_XLOG(ctl->num, atomic_read(&ctx->koff_cnt), ctx->clk_enabled,
 				ctx->rdptr_enabled, XLOG_FUNC_EXIT);
-	mutex_unlock(&ctl->offlock);
 	pr_debug("%s:-\n", __func__);
 
-	return ret;
+	return 0;
+}
+
+void mdss_mdp_cmd_dump_ctx(struct mdss_mdp_ctl *ctl)
+{
+	struct mdss_mdp_cmd_ctx *ctx = ctl->priv_data;
+
+	MDSS_TIMEOUT_LOG("is panel_on: %d\n",
+		__mdss_mdp_cmd_is_panel_power_on_interactive(ctx));
+
+	MDSS_TIMEOUT_LOG("pp_num=%u\n", ctx->pp_num);
+	MDSS_TIMEOUT_LOG("koff_cnt=%d\n", atomic_read(&ctx->koff_cnt));
+	MDSS_TIMEOUT_LOG("clk_enabled=%d\n", ctx->clk_enabled);
+	MDSS_TIMEOUT_LOG("vsync_enabled=%d\n", ctx->vsync_enabled);
+	MDSS_TIMEOUT_LOG("rdptr_enabled=%d\n", ctx->rdptr_enabled);
 }
 
 static int mdss_mdp_cmd_intfs_setup(struct mdss_mdp_ctl *ctl,
@@ -1133,6 +1149,7 @@ int mdss_mdp_cmd_start(struct mdss_mdp_ctl *ctl)
 	ctl->remove_vsync_handler = mdss_mdp_cmd_remove_vsync_handler;
 	ctl->read_line_cnt_fnc = mdss_mdp_cmd_line_count;
 	ctl->restore_fnc = mdss_mdp_cmd_restore;
+	ctl->ctx_dump_fnc = mdss_mdp_cmd_dump_ctx;
 	pr_debug("%s:-\n", __func__);
 
 	return 0;

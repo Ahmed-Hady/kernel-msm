@@ -29,6 +29,15 @@ struct panel_id {
 #define MDSS_DSI_RST_SEQ_LEN	10
 #define MDSS_MDP_MAX_FETCH 12
 
+enum cabc_mode {
+	CABC_UI_MODE = 0,
+	CABC_ST_MODE,
+	CABC_MV_MODE,
+	CABC_DIS_MODE,
+	CABC_OFF_MODE,
+	CABC_MODE_MAX_NUM
+};
+
 /* panel type list */
 #define NO_PANEL		0xffff	/* No Panel */
 #define MDDI_PANEL		1	/* MDDI */
@@ -176,10 +185,13 @@ struct mdss_intf_recovery {
  *				based on the dsi mode passed as argument.
  *				- 0: update to video mode
  *				- 1: update to command mode
+ * @MDSS_EVENT_ENABLE_TE: Change TE state, used for factory testing only
  * @MDSS_EVENT_REGISTER_RECOVERY_HANDLER: Event to recover the interface in
  *					case there was any errors detected.
  * @MDSS_EVENT_INTF_RESTORE: Event to restore the interface in case there
  *				was any errors detected during normal operation.
+ * @MDSS_EVENT_SET_CABC: Set CABC mode, for Motorola "Dynamic CABC" feature.
+ * @MDSS_EVENT_ENABLE_HBM: Enable Motorola High Brightness Mode feature.
  */
 enum mdss_intf_events {
 	MDSS_EVENT_RESET = 1,
@@ -202,7 +214,10 @@ enum mdss_intf_events {
 	MDSS_EVENT_DSI_STREAM_SIZE,
 	MDSS_EVENT_DSI_DYNAMIC_SWITCH,
 	MDSS_EVENT_REGISTER_RECOVERY_HANDLER,
+	MDSS_EVENT_ENABLE_TE,
 	MDSS_EVENT_INTF_RESTORE,
+	MDSS_EVENT_SET_CABC,
+	MDSS_EVENT_ENABLE_HBM,
 };
 
 struct lcd_panel_info {
@@ -232,6 +247,7 @@ struct mdss_dsi_phy_ctrl {
 	uint32_t pll[21];
 	char lanecfg[45];
 	bool reg_ldo_mode;
+	bool legacy_reg_prg;
 };
 
 struct mipi_panel_info {
@@ -368,6 +384,8 @@ struct mdss_panel_info {
 	u32 out_format;
 	u32 rst_seq[MDSS_DSI_RST_SEQ_LEN];
 	u32 rst_seq_len;
+	u32 dis_rst_seq[MDSS_DSI_RST_SEQ_LEN];
+	u32 dis_rst_seq_len;
 	u32 vic; /* video identification code */
 	struct mdss_rect roi;
 	int pwm_pmic_gpio;
@@ -406,6 +424,10 @@ struct mdss_panel_info {
 	bool dynamic_switch_pending;
 	bool is_lpm_mode;
 	bool is_split_display;
+	char supplier[8];
+	u32 bl_shutdown_delay;
+	u32 bl_on_defer_delay;
+	struct hrtimer bl_on_defer_hrtimer;
 
 	bool is_prim_panel;
 
@@ -417,6 +439,11 @@ struct mdss_panel_info {
 	struct mipi_panel_info mipi;
 	struct lvds_panel_info lvds;
 	struct edp_panel_info edp;
+
+	bool dynamic_cabc_enabled;
+	enum cabc_mode cabc_mode;
+	bool hbm_feature_enabled;
+	bool hbm_state;
 };
 
 struct mdss_panel_data {
@@ -618,4 +645,19 @@ int mdss_panel_get_boot_cfg(void);
  * returns true if mdss is ready, else returns false.
  */
 bool mdss_is_ready(void);
+
+/**
+ * mdss_panel_map_cabc_name() - get panel CABC mode name
+ *
+ * returns name if mapping succeeds, else returns NULL.
+ */
+static const char *cabc_mode_names[CABC_MODE_MAX_NUM] = {
+	"UI", "ST", "MV", "DIS", "OFF"
+};
+static inline const char *mdss_panel_map_cabc_name(int mode)
+{
+	if (mode >= CABC_UI_MODE && mode < CABC_MODE_MAX_NUM)
+		return cabc_mode_names[mode];
+	return NULL;
+}
 #endif /* MDSS_PANEL_H */

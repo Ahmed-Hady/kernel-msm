@@ -36,7 +36,7 @@ struct diag_usb_info diag_usb[NUM_DIAG_USB_DEV] = {
 		.name = DIAG_LEGACY,
 		.connected = 0,
 		.enabled = 0,
-		.mempool = POOL_TYPE_MUX_APPS,
+		.mempool = POOL_TYPE_USB_APPS,
 		.hdl = NULL,
 		.ops = NULL,
 		.read_buf = NULL,
@@ -52,7 +52,7 @@ struct diag_usb_info diag_usb[NUM_DIAG_USB_DEV] = {
 		.name = DIAG_MDM,
 		.connected = 0,
 		.enabled = 0,
-		.mempool = POOL_TYPE_MDM_MUX,
+		.mempool = POOL_TYPE_MDM_USB,
 		.hdl = NULL,
 		.ops = NULL,
 		.read_buf = NULL,
@@ -67,7 +67,7 @@ struct diag_usb_info diag_usb[NUM_DIAG_USB_DEV] = {
 		.name = DIAG_MDM2,
 		.connected = 0,
 		.enabled = 0,
-		.mempool = POOL_TYPE_MDM2_MUX,
+		.mempool = POOL_TYPE_MDM2_USB,
 		.hdl = NULL,
 		.ops = NULL,
 		.read_buf = NULL,
@@ -82,7 +82,7 @@ struct diag_usb_info diag_usb[NUM_DIAG_USB_DEV] = {
 		.name = DIAG_QSC,
 		.connected = 0,
 		.enabled = 0,
-		.mempool = POOL_TYPE_QSC_MUX,
+		.mempool = POOL_TYPE_QSC_USB,
 		.hdl = NULL,
 		.ops = NULL,
 		.read_buf = NULL,
@@ -284,6 +284,11 @@ int diag_usb_write(int id, unsigned char *buf, int len, int ctxt)
 	}
 
 	usb_info = &diag_usb[id];
+	if (!usb_info->hdl || !usb_info->connected) {
+		pr_debug_ratelimited("diag: USB ch %s is not connected\n",
+				     usb_info->name);
+		return -ENODEV;
+	}
 
 	req = diagmem_alloc(driver, sizeof(struct diag_request),
 			    usb_info->mempool);
@@ -303,12 +308,6 @@ int diag_usb_write(int id, unsigned char *buf, int len, int ctxt)
 	req->length = len;
 	req->context = (void *)(uintptr_t)ctxt;
 
-	if (!usb_info->hdl || !usb_info->connected) {
-		pr_debug_ratelimited("diag: USB ch %s is not connected\n",
-				     usb_info->name);
-		diagmem_free(driver, req, usb_info->mempool);
-		return -ENODEV;
-	}
 	err = usb_diag_write(usb_info->hdl, req);
 	if (err) {
 		pr_err_ratelimited("diag: In %s, error writing to usb channel %s, err: %d\n",

@@ -107,7 +107,7 @@ module_param_named(
 	print_parsed_dt, print_parsed_dt, bool, S_IRUGO | S_IWUSR | S_IWGRP
 );
 
-static bool sleep_disabled;
+static bool sleep_disabled = true;
 module_param_named(sleep_disabled,
 	sleep_disabled, bool, S_IRUGO | S_IWUSR | S_IWGRP);
 
@@ -251,13 +251,7 @@ static int cpu_power_select(struct cpuidle_device *dev,
 	if (sleep_disabled)
 		return 0;
 
-	/*
-	 * TODO:
-	 * Assumes event happens always on Core0. Need to check for validity
-	 * of this scenario on cluster low power modes
-	 */
-	if (!dev->cpu)
-		next_event_us = (uint32_t)(ktime_to_us(get_next_event_time()));
+	next_event_us = (uint32_t)(ktime_to_us(get_next_event_time(dev->cpu)));
 
 	for (i = 0; i < cpu->nlevels; i++) {
 		struct lpm_cpu_level *level = &cpu->levels[i];
@@ -318,7 +312,7 @@ static int cpu_power_select(struct cpuidle_device *dev,
 		}
 	}
 
-	if (modified_time_us && !dev->cpu)
+	if (modified_time_us)
 		msm_pm_set_timer(modified_time_us);
 
 	return best_level;
@@ -377,6 +371,13 @@ static int cluster_select(struct lpm_cluster *cluster, bool from_idle)
 
 	if (!cluster)
 		return -EINVAL;
+	/*
+	 * TODO:
+	 * use per_cpu pm_qos to prevent low power modes based on
+	 * latency
+	 */
+	if (msm_rpm_waiting_for_ack())
+		return best_level;
 
 	sleep_us = (uint32_t)get_cluster_sleep_time(cluster, NULL, from_idle);
 

@@ -24,6 +24,8 @@
 #include "mdss_debug.h"
 #include "mdss_mdp_trace.h"
 
+#include "mdss_timeout.h"
+
 /* wait for at least 2 vsyncs for lowest refresh rate (24hz) */
 #define VSYNC_TIMEOUT_US 100000
 
@@ -191,9 +193,12 @@ static void mdss_mdp_video_intf_recovery(void *data, int event)
 	if (delay > POLL_TIME_USEC_FOR_LN_CNT)
 		delay = POLL_TIME_USEC_FOR_LN_CNT;
 
+	mutex_lock(&ctl->offlock);
 	while (1) {
-		if (!ctl || !ctx || !ctx->timegen_en) {
-			pr_warn("Target is in suspend state\n");
+		if (!ctl || ctl->mfd->shutdown_pending || !ctx ||
+				!ctx->timegen_en) {
+			pr_warn("Target is in suspend or shutdown pending\n");
+			mutex_unlock(&ctl->offlock);
 			return;
 		}
 
@@ -203,6 +208,7 @@ static void mdss_mdp_video_intf_recovery(void *data, int event)
 			(active_lns_cnt + min_ln_cnt))) {
 			pr_debug("%s, Needed lines left line_cnt=%d\n",
 						__func__, line_cnt);
+			mutex_unlock(&ctl->offlock);
 			return;
 		} else {
 			pr_warn("line count is less. line_cnt = %d\n",
@@ -412,7 +418,7 @@ static int mdss_mdp_video_intfs_stop(struct mdss_mdp_ctl *ctl,
 	struct mdss_mdp_video_ctx *ctx;
 	struct mdss_mdp_vsync_handler *tmp, *handle;
 	struct mdss_mdp_ctl *sctl;
-	int rc = 0;
+	int rc;
 	u32 frame_rate = 0;
 	int ret = 0;
 
@@ -447,7 +453,8 @@ static int mdss_mdp_video_intfs_stop(struct mdss_mdp_ctl *ctl,
 		if (rc == -EBUSY) {
 			pr_debug("intf #%d busy don't turn off\n",
 				 ctl->intf_num);
-			goto end;
+			mutex_unlock(&ctl->offlock);
+			return rc;
 		}
 		WARN(rc, "intf %d blank error (%d)\n", ctl->intf_num, rc);
 
@@ -484,10 +491,10 @@ static int mdss_mdp_video_intfs_stop(struct mdss_mdp_ctl *ctl,
 	mdss_mdp_set_intr_callback(MDSS_MDP_IRQ_INTF_UNDER_RUN,
 		(inum + MDSS_MDP_INTF0), NULL, NULL);
 
-	ctx->ref_cnt--;
-end:
 	mutex_unlock(&ctl->offlock);
-	return rc;
+	ctx->ref_cnt--;
+
+	return 0;
 }
 
 
@@ -582,6 +589,8 @@ static int mdss_mdp_video_wait4comp(struct mdss_mdp_ctl *ctl, void *arg)
 {
 	struct mdss_mdp_video_ctx *ctx;
 	int rc;
+	static int timeout_occurred;
+	u32 prev_vsync_cnt;
 
 	ctx = (struct mdss_mdp_video_ctx *) ctl->priv_data;
 	if (!ctx) {
@@ -594,16 +603,27 @@ static int mdss_mdp_video_wait4comp(struct mdss_mdp_ctl *ctl, void *arg)
 	if (ctx->polling_en) {
 		rc = mdss_mdp_video_pollwait(ctl);
 	} else {
+		prev_vsync_cnt = ctl->vsync_cnt;
 		mutex_unlock(&ctl->lock);
 		rc = wait_for_completion_timeout(&ctx->vsync_comp,
 				usecs_to_jiffies(VSYNC_TIMEOUT_US));
 		mutex_lock(&ctl->lock);
 		if (rc == 0) {
+			pr_err("%s: TIMEOUT (vsync_cnt: prev: %u cur: %u)\n",
+				__func__, prev_vsync_cnt, ctl->vsync_cnt);
+			timeout_occurred = 1;
+			mdss_timeout_dump(__func__);
+
 			pr_warn("vsync wait timeout %d, fallback to poll mode\n",
 					ctl->num);
 			ctx->polling_en++;
 			rc = mdss_mdp_video_pollwait(ctl);
 		} else {
+			if (timeout_occurred)
+				pr_info("%s: recovered from previous timeout\n",
+					__func__);
+			timeout_occurred = 0;
+
 			rc = 0;
 		}
 	}
@@ -1070,6 +1090,16 @@ static bool mdss_mdp_fetch_programable(struct mdss_mdp_ctl *ctl)
 	return ret;
 }
 
+void mdss_mdp_video_dump_ctx(struct mdss_mdp_ctl *ctl)
+{
+	struct mdss_mdp_video_ctx *ctx = ctl->priv_data;
+
+	MDSS_TIMEOUT_LOG("timegen_en=%u\n", ctx->timegen_en);
+	MDSS_TIMEOUT_LOG("polling_en=%u\n", ctx->polling_en);
+	MDSS_TIMEOUT_LOG("poll_cnt=%u\n", ctx->poll_cnt);
+	MDSS_TIMEOUT_LOG("wait_pending=%d\n", ctx->wait_pending);
+}
+
 static void mdss_mdp_fetch_start_config(struct mdss_mdp_video_ctx *ctx,
 		struct mdss_mdp_ctl *ctl)
 {
@@ -1238,6 +1268,7 @@ int mdss_mdp_video_start(struct mdss_mdp_ctl *ctl)
 	ctl->add_vsync_handler = mdss_mdp_video_add_vsync_handler;
 	ctl->remove_vsync_handler = mdss_mdp_video_remove_vsync_handler;
 	ctl->config_fps_fnc = mdss_mdp_video_config_fps;
+	ctl->ctx_dump_fnc = mdss_mdp_video_dump_ctx;
 
 	return 0;
 }

@@ -54,7 +54,15 @@ enum pon_restart_reason {
 	PON_RESTART_REASON_RTC		= 0x03,
 };
 
+#define RESET_EXTRA_RESET_KUNPOW_REASON	BIT(9)
+#define RESET_EXTRA_PANIC_REASON	BIT(3)
+#define RESET_EXTRA_REBOOT_BL_REASON	BIT(2)
+#define RESET_EXTRA_HW_RESET_REASON	BIT(1)
+
+#define QPNP_PON_KEY_RESIN_BIT		BIT(1)
+
 #ifdef CONFIG_QPNP_POWER_ON
+extern int qpnp_pon_key_status;
 int qpnp_pon_system_pwr_off(enum pon_power_off_type type);
 int qpnp_pon_is_warm_reset(void);
 int qpnp_pon_trigger_config(enum pon_trigger_source pon_src, bool enable);
@@ -62,6 +70,7 @@ int qpnp_pon_wd_config(bool enable);
 int qpnp_pon_set_restart_reason(enum pon_restart_reason reason);
 bool qpnp_pon_check_hard_reset_stored(void);
 
+int qpnp_pon_store_extra_reset_info(u16 mask, u16 val);
 #else
 static int qpnp_pon_system_pwr_off(enum pon_power_off_type type)
 {
@@ -84,6 +93,10 @@ static inline int qpnp_pon_set_restart_reason(enum pon_restart_reason reason)
 static inline bool qpnp_pon_check_hard_reset_stored(void)
 {
 	return false;
+}
+static inline int qpnp_pon_store_extra_reset_info(u16 mask, u16 val)
+{
+	return -ENODEV;
 }
 #endif
 

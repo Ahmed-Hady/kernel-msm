@@ -22,13 +22,13 @@
 #define I2C_SEQ_REG_DATA_MAX    256
 #define MSM_V4L2_PIX_FMT_META v4l2_fourcc('M', 'E', 'T', 'A') /* META */
 
-#define MAX_ACTUATOR_REG_TBL_SIZE 8
+#define MAX_ACTUATOR_REG_TBL_SIZE 15
 #define MAX_ACTUATOR_REGION       5
 #define NUM_ACTUATOR_DIR          2
 #define MAX_ACTUATOR_SCENARIO     8
 #define MAX_ACT_MOD_NAME_SIZE     32
 #define MAX_ACT_NAME_SIZE         32
-#define MAX_ACTUATOR_INIT_SET     12
+#define MAX_ACTUATOR_INIT_SET     120
 #define MAX_I2C_REG_SET           12
 
 #define MAX_NAME_SIZE             32
@@ -123,11 +123,22 @@ enum camerab_mode_t {
 enum sensor_stats_type {
 	YRGB,
 	YYYY,
+	PDAF,
 };
 
+/* Need to keep this table aligned with
+ * enum msm_camera_i2c_data_type
+ */
 enum msm_actuator_data_type {
 	MSM_ACTUATOR_BYTE_DATA = 1,
 	MSM_ACTUATOR_WORD_DATA,
+	MSM_ACTUATOR_DWORD_DATA,
+	MSM_ACTUATOR_SET_BYTE_MASK,
+	MSM_ACTUATOR_UNSET_BYTE_MASK,
+	MSM_ACTUATOR_SET_WORD_MASK,
+	MSM_ACTUATOR_UNSET_WORD_MASK,
+	MSM_ACTUATOR_SET_BYTE_WRITE_MASK_DATA,
+	MSM_ACTUATOR_DATA_TYPE_MAX,
 };
 
 enum msm_actuator_addr_type {
@@ -138,17 +149,25 @@ enum msm_actuator_addr_type {
 enum msm_actuator_write_type {
 	MSM_ACTUATOR_WRITE_HW_DAMP,
 	MSM_ACTUATOR_WRITE_DAC,
+	MSM_ACTUATOR_WRITE,
+	MSM_ACTUATOR_WRITE_DIR_REG,
+	MSM_ACTUATOR_POLL,
+	MSM_ACTUATOR_READ_WRITE,
+	MSM_ACTUATOR_WRITE_REG,
 };
 
 enum msm_actuator_i2c_operation {
 	MSM_ACT_WRITE = 0,
 	MSM_ACT_POLL,
+	MSM_ACT_READ_SET,
 };
 
 enum actuator_type {
 	ACTUATOR_VCM,
 	ACTUATOR_PIEZO,
 	ACTUATOR_HVCM,
+	ACTUATOR_BIVCM,
+	ACTUATOR_MOT_HVCM,
 };
 
 enum msm_flash_driver_type {
@@ -183,6 +202,35 @@ struct msm_sensor_power_setting_array {
 	uint16_t size_down;
 };
 
+struct otp_info_t {
+	uint8_t *otp_info;
+	uint8_t otp_read;
+};
+
+struct msm_sensor_otp_cal_info_t {
+	uint8_t enable;
+	uint16_t page_size;
+	uint16_t num_of_pages;
+	uint16_t page_reg_addr;
+	uint16_t page_reg_base_addr;
+
+	uint16_t ctrl_reg_addr;
+	uint16_t ctrl_reg_initial_mode;
+	uint16_t ctrl_reg_read_mode;
+	uint16_t ctrl_reg_read_mode_disable;
+	uint16_t reset_reg_addr;
+	uint16_t reset_reg_stream_on;
+	uint16_t reset_reg_stream_off;
+
+	uint16_t data_seg_addr;
+	enum msm_camera_i2c_data_type data_size;
+	uint8_t big_endian;
+	enum msm_camera_i2c_reg_addr_type addr_type;
+	uint16_t eeprom_enable;
+	uint16_t eeprom_slave_addr;
+	uint16_t eeprom_mem_addr;
+};
+
 struct msm_sensor_init_params {
 	/* mask of modes supported: 2D, 3D */
 	int                 modes_supported;
@@ -190,6 +238,7 @@ struct msm_sensor_init_params {
 	enum camb_position_t position;
 	/* sensor mount angle */
 	uint32_t            sensor_mount_angle;
+	struct msm_sensor_otp_cal_info_t sensor_otp;
 };
 
 struct msm_sensor_id_info_t {
@@ -212,6 +261,7 @@ struct msm_camera_sensor_slave_info {
 	uint8_t  is_init_params_valid;
 	struct msm_sensor_init_params sensor_init_params;
 	uint8_t is_flash_supported;
+	struct otp_info_t sensor_otp;
 };
 
 struct msm_camera_i2c_reg_array {
@@ -276,6 +326,10 @@ struct msm_actuator_reg_params_t {
 	uint16_t reg_addr;
 	uint16_t hw_shift;
 	uint16_t data_shift;
+	uint16_t data_type;
+	uint16_t addr_type;
+	uint16_t reg_data;
+	uint16_t delay;
 };
 
 struct damping_params_t {
@@ -290,6 +344,8 @@ struct region_params_t {
 	*/
 	uint16_t step_bound[2];
 	uint16_t code_per_step;
+	/* qvalue for converting float type numbers to integer format */
+	uint32_t qvalue;
 };
 
 struct reg_settings_t {
@@ -299,6 +355,7 @@ struct reg_settings_t {
 	enum msm_actuator_data_type data_type;
 	enum msm_actuator_i2c_operation i2c_operation;
 	uint32_t delay;
+	uint16_t eeprom_offset;
 };
 
 struct msm_camera_i2c_reg_setting_array {

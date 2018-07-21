@@ -286,6 +286,13 @@ static int32_t msm_sensor_get_dt_data(struct device_node *of_node,
 		rc = -ENOMEM;
 		goto FREE_ACTUATOR_INFO;
 	}
+	if (0 > of_property_read_u32(of_node, "qcom,i2c_freq_mode",
+		&sensordata->slave_info->sensor_i2c_freq_mode)) {
+		CDBG("%s:%d Default i2c_freq_mode\n", __func__, __LINE__);
+		sensordata->slave_info->sensor_i2c_freq_mode = 0;
+	}
+	CDBG("%s:%d qcom,i2c_freq_mode %d\n", __func__,__LINE__,
+		sensordata->slave_info->sensor_i2c_freq_mode);
 
 	rc = of_property_read_u32_array(of_node, "qcom,slave-id",
 		id_info, 3);
@@ -721,10 +728,15 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 	}
 	case CFG_SLAVE_READ_I2C: {
 		struct msm_camera_i2c_read_config read_config;
+		struct msm_camera_i2c_read_config *read_config_ptr = NULL;
 		uint16_t local_data = 0;
 		uint16_t orig_slave_addr = 0, read_slave_addr = 0;
-		if (copy_from_user(&read_config,
-			(void *)compat_ptr(cdata->cfg.setting),
+
+		read_config_ptr =
+			(struct msm_camera_i2c_read_config *)
+			compat_ptr(cdata->cfg.setting);
+
+		if (copy_from_user(&read_config, read_config_ptr,
 			sizeof(struct msm_camera_i2c_read_config))) {
 			pr_err("%s:%d failed\n", __func__, __LINE__);
 			rc = -EFAULT;
@@ -761,12 +773,7 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 			pr_err("%s:%d: i2c_read failed\n", __func__, __LINE__);
 			break;
 		}
-		if (copy_to_user(&read_config.data,
-			(void *)&local_data, sizeof(uint16_t))) {
-			pr_err("%s:%d copy failed\n", __func__, __LINE__);
-			rc = -EFAULT;
-			break;
-		}
+		read_config_ptr->data = local_data;
 		break;
 	}
 	case CFG_WRITE_I2C_SEQ_ARRAY: {
@@ -920,6 +927,37 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 		break;
 	}
 
+	case CFG_GET_MODULE_INFO: {
+		struct msm_camera_sensor_slave_info *sensor_slave_info;
+		struct otp_info_t *sensor_otp;
+		uint32_t otp_data_size;
+		uint8_t *otp_data;
+
+		sensor_slave_info = s_ctrl->sensordata->cam_slave_info;
+		if (!sensor_slave_info) {
+			pr_err("%s: camera slave info is not defined",
+				__func__);
+			rc = -EFAULT;
+			break;
+		}
+
+		sensor_otp = &sensor_slave_info->sensor_otp;
+		otp_data_size =
+			(sensor_slave_info->sensor_init_params.
+			sensor_otp.page_size) * (sensor_slave_info->
+			sensor_init_params.sensor_otp.num_of_pages);
+
+		otp_data = (uint8_t *)compat_ptr(cdata->cfg.otp_info);
+
+		if (copy_to_user((void __user *)otp_data,
+			(uint8_t *)sensor_otp->otp_info, otp_data_size)) {
+			pr_err("%s: error copying otp buffer to user\n",
+				__func__);
+			rc = -EFAULT;
+			break;
+		}
+		break;
+	}
 	default:
 		rc = -EFAULT;
 		break;
@@ -1037,10 +1075,13 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 	}
 	case CFG_SLAVE_READ_I2C: {
 		struct msm_camera_i2c_read_config read_config;
+		struct msm_camera_i2c_read_config *read_config_ptr = NULL;
 		uint16_t local_data = 0;
 		uint16_t orig_slave_addr = 0, read_slave_addr = 0;
-		if (copy_from_user(&read_config,
-			(void *)cdata->cfg.setting,
+
+		read_config_ptr =
+			(struct msm_camera_i2c_read_config *)cdata->cfg.setting;
+		if (copy_from_user(&read_config, read_config_ptr,
 			sizeof(struct msm_camera_i2c_read_config))) {
 			pr_err("%s:%d failed\n", __func__, __LINE__);
 			rc = -EFAULT;
@@ -1077,12 +1118,7 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 			pr_err("%s:%d: i2c_read failed\n", __func__, __LINE__);
 			break;
 		}
-		if (copy_to_user(&read_config.data,
-			(void *)&local_data, sizeof(uint16_t))) {
-			pr_err("%s:%d copy failed\n", __func__, __LINE__);
-			rc = -EFAULT;
-			break;
-		}
+		read_config_ptr->data = local_data;
 		break;
 	}
 	case CFG_SLAVE_WRITE_I2C_ARRAY: {
@@ -1302,6 +1338,35 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 		}
 		break;
 	}
+	case CFG_GET_MODULE_INFO: {
+		struct msm_camera_sensor_slave_info *sensor_slave_info;
+		struct otp_info_t *sensor_otp;
+		uint32_t otp_data_size;
+
+		sensor_slave_info = s_ctrl->sensordata->cam_slave_info;
+		if (!sensor_slave_info) {
+			pr_err("%s: camera slave info is not defined",
+				__func__);
+			rc = -EFAULT;
+			break;
+		}
+
+		sensor_otp = &sensor_slave_info->sensor_otp;
+		otp_data_size =
+			(sensor_slave_info->sensor_init_params.
+			sensor_otp.page_size) * (sensor_slave_info->
+			sensor_init_params.sensor_otp.num_of_pages);
+
+		if (copy_to_user((void *)cdata->cfg.sensor_otp.otp_info,
+			(uint8_t *)sensor_otp->otp_info,
+			otp_data_size)) {
+			pr_err("%s: error copying otp buffer to user\n",
+				__func__);
+			rc = -EFAULT;
+			break;
+		}
+		break;
+	}
 	default:
 		rc = -EFAULT;
 		break;
@@ -1432,6 +1497,8 @@ int32_t msm_sensor_platform_probe(struct platform_device *pdev,
 		s_ctrl->sensordata->slave_info->sensor_slave_addr >> 1;
 	cci_client->retries = 3;
 	cci_client->id_map = 0;
+	cci_client->i2c_freq_mode =
+		s_ctrl->sensordata->slave_info->sensor_i2c_freq_mode;
 	if (!s_ctrl->func_tbl)
 		s_ctrl->func_tbl = &msm_sensor_func_tbl;
 	if (!s_ctrl->sensor_i2c_client->i2c_func_tbl)

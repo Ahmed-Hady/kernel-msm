@@ -120,6 +120,10 @@ extern int scm_restore_sec_cfg(u32 device_id, u32 spare, int *scm_ret);
 extern u32 scm_io_read(phys_addr_t address);
 extern int scm_io_write(phys_addr_t address, u32 val);
 
+#ifndef CONFIG_ARM64
+extern void scm_inv_range(unsigned long start, unsigned long end);
+#endif
+
 #define SCM_HDCP_MAX_REG 5
 
 struct scm_hdcp_req {
@@ -213,5 +217,11 @@ static inline int scm_io_write(phys_addr_t address, u32 val)
 {
 	return 0;
 }
+
+static inline void scm_inv_range(unsigned long start, unsigned long end)
+{
+	return;
+}
+
 #endif
 #endif

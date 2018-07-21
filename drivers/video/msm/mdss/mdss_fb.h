@@ -121,6 +121,7 @@ struct disp_info_notify {
 	int value;
 	int is_suspend;
 	int ref_count;
+	bool init_done;
 };
 
 struct msm_sync_pt_data {
@@ -208,6 +209,7 @@ struct msm_fb_data_type {
 
 	struct panel_id panel;
 	struct mdss_panel_info *panel_info;
+	struct mdss_panel_info reconfig_panel_info;
 	int split_mode;
 	int split_fb_left;
 	int split_fb_right;
@@ -289,6 +291,14 @@ struct msm_fb_data_type {
 
 	int fb_mmap_type;
 };
+
+struct sys_panelinfo {
+	char *panel_name;
+	char *panel_supplier;
+	u64 *panel_ver;
+};
+
+extern struct sys_panelinfo panelinfo;
 
 static inline void mdss_fb_update_notify_update(struct msm_fb_data_type *mfd)
 {

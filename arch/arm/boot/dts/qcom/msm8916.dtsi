@@ -45,7 +45,7 @@
 		smd36 = &smdtty_loopback;
 
 		spi0 = &spi_0; /* SPI0 controller device */
-		i2c0 = &i2c_0; /* I2C0 controller device */
+		i2c2 = &i2c_2; /* I2C2 controller device */
 		i2c5 = &i2c_5; /* I2C5 controller device */
 		i2c6 = &i2c_6; /* I2C6 NFC qup6 device */
 		i2c4 = &i2c_4; /* I2C4 controller device */
@@ -301,8 +301,9 @@
 	qcom,clock-a7@0b011050 {
 		compatible = "qcom,clock-a53-8916";
 		reg = <0x0b011050 0x8>,
-		      <0x0005c004 0x8>;
-		reg-names = "rcg-base", "efuse1";
+		      <0x0005c004 0x8>,
+		      <0x0005c00c 0x8>;
+		reg-names = "rcg-base", "efuse1", "efuse";
 		qcom,safe-freq = < 400000000 >;
 		cpu-vdd-supply = <&apc_vreg_corner>;
 		clocks = <&clock_gcc clk_gpll0_ao_clk_src>,
@@ -328,6 +329,29 @@
 			<  998400000 5>,
 			< 1094400000 6>,
 			< 1152000000 7>;
+
+		qcom,speed0-bin-v1 =
+			<          0 0>,
+			<  200000000 1>,
+			<  400000000 2>,
+			<  533333000 3>,
+			<  800000000 4>,
+			<  998400000 5>,
+			< 1094400000 6>,
+			< 1152000000 7>,
+			< 1209600000 8>;
+
+		qcom,speed2-bin-v1 =
+			<          0 0>,
+			<  200000000 1>,
+			<  400000000 2>,
+			<  533333000 3>,
+			<  800000000 4>,
+			<  998400000 5>,
+			< 1094400000 6>,
+			< 1152000000 7>,
+			< 1209600000 8>,
+			< 1363200000 9>;
 	};
 
 	cpubw: qcom,cpubw {
@@ -371,7 +395,8 @@
 			 <  998400 >,
 			 < 1094400 >,
 			 < 1152000 >,
-			 < 1209600 >;
+			 < 1209600 >,
+			 < 1363200 >;
 	};
 
 	qcom,sps {
@@ -1386,7 +1411,7 @@
 		};
         };
 
-	i2c_0: i2c@78b6000 { /* BLSP1 QUP2 */
+	i2c_2: i2c@78b6000 { /* BLSP1 QUP2 */
 		compatible = "qcom,i2c-msm-v2";
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -1555,7 +1580,7 @@
 		qcom,scm_core_clk_src-freq = <80000000>;
 
 		qcom,pas-id = <9>;
-		qcom,proxy-timeout-ms = <5000>;
+		qcom,proxy-timeout-ms = <100>;
 		qcom,firmware-name = "venus";
 		linux,contiguous-region = <&venus_qseecom_mem>;
 	};
@@ -1590,7 +1615,7 @@
 			qcom,min-level = <1>; /* No Request */
 		};
 
-		qcom,vdd-apps-rstr{
+		msm_thermal_freq: qcom,vdd-apps-rstr{
 			qcom,vdd-rstr-reg = "vdd-apps";
 			qcom,levels = <533330 800000 998400>;
 			qcom,freq-req;
